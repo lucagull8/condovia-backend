@@ -3,7 +3,7 @@ const Condominio = require('../models/Condominio');
 const Contratto = require('../models/Contratto');
 const { requireAuth } = require('../middleware/auth');
 
-// GET /api/condomini — all condomini for current admin
+// GET /api/condomini — tutti i condomini dell'admin loggato
 router.get('/', requireAuth, async (req, res) => {
   try {
     const condomini = await Condominio.find({ amministratoreId: req.utente._id }).lean();
@@ -30,13 +30,14 @@ router.get('/', requireAuth, async (req, res) => {
 // POST /api/condomini — admin aggiunge un nuovo condominio
 router.post('/', requireAuth, async (req, res) => {
   try {
-    const { nome, via, citta, unita } = req.body;
+    const { nome, via, citta, unita, codiceFiscale } = req.body;
     if (!nome) return res.status(400).json({ error: 'Nome condominio obbligatorio' });
     const condo = await Condominio.create({
       nome: nome.trim(),
       via: (via || '').trim(),
       citta: (citta || '').trim(),
       unita: parseInt(unita) || 0,
+      codiceFiscale: (codiceFiscale || '').trim(),
       amministratoreId: req.utente._id,
     });
     res.status(201).json(condo);
