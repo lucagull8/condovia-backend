@@ -253,11 +253,11 @@ router.post('/contratti', upload.any(), async (req, res) => {
       dataInizio, dataScadenza, richiestaId, pods: podsJson,
     } = req.body;
 
-    if (!amministratoreId || !condominioId || !servizioId || !fornitore || !prezzo || !dataInizio || !dataScadenza) {
+    if (!amministratoreId || !condominioId || !servizioId || !fornitore || !dataInizio || !dataScadenza) {
       return res.status(400).json({ error: 'Campi obbligatori mancanti' });
     }
 
-    const prezzoNum = parseFloat(prezzo);
+    const prezzoNum = parseFloat(prezzo) || 0;
     const commNum = parseFloat(commissioneCondovia) || 0;
     const stornoVal = parseFloat(stornoValore) || 0;
     // Storno calcolato sulla commissione Condovia (non sul prezzo fornitore)
