@@ -29,7 +29,7 @@ router.post('/register', async (req, res) => {
     if (password.length < 6) return res.status(400).json({ error: 'La password deve avere almeno 6 caratteri' });
     const exists = await Utente.findOne({ email: email.toLowerCase().trim() });
     if (exists) return res.status(409).json({ error: 'Email già registrata' });
-    await Utente.create({
+    const utente = await Utente.create({
       nome: nome.trim(), cognome: cognome.trim(),
       email: email.toLowerCase().trim(),
       password,
@@ -37,6 +37,21 @@ router.post('/register', async (req, res) => {
       dataNascita: dataNascita || undefined,
       studio: studio || '', telefono: telefono || '',
     });
+
+    if (process.env.RESEND_API_KEY) {
+      const { Resend } = require('resend');
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      await resend.emails.send({
+        from: 'Condovia <noreply@condovia.it>',
+        to: utente.email,
+        subject: 'Richiesta ricevuta — Condovia',
+        html: `<p>Ciao ${utente.nome},</p>
+          <p>Abbiamo ricevuto la tua richiesta di accesso alla piattaforma Condovia.</p>
+          <p>Il nostro team la verificherà e riceverai una email di conferma non appena il tuo account sarà attivato.</p>
+          <p>— Il team Condovia</p>`,
+      }).catch(e => console.error('Email presa in carico fallita:', e.message));
+    }
+
     res.status(201).json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
