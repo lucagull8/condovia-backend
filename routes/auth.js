@@ -58,6 +58,21 @@ router.post('/register', async (req, res) => {
   }
 });
 
+// POST /api/auth/change-password
+router.post('/change-password', requireAuth, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Campi obbligatori' });
+    if (newPassword.length < 6) return res.status(400).json({ error: 'La nuova password deve avere almeno 6 caratteri' });
+    const u = await Utente.findById(req.utente._id);
+    const ok = await u.confrontaPassword(currentPassword);
+    if (!ok) return res.status(401).json({ error: 'Password attuale non corretta' });
+    u.password = newPassword;
+    await u.save();
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // POST /api/auth/forgot-password
 router.post('/forgot-password', async (req, res) => {
   try {
