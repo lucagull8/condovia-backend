@@ -58,6 +58,37 @@ router.post('/register', async (req, res) => {
   }
 });
 
+// POST /api/auth/forgot-password
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email richiesta' });
+    const u = await Utente.findOne({ email: email.toLowerCase().trim(), stato: 'attivo', ruolo: 'amministratore' });
+    if (!u) return res.status(404).json({ error: 'Nessun account attivo trovato con questa email' });
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+    let tempPw = '';
+    for (let i = 0; i < 10; i++) tempPw += chars[Math.floor(Math.random() * chars.length)];
+    u.password = tempPw;
+    await u.save();
+    if (process.env.RESEND_API_KEY) {
+      const { Resend } = require('resend');
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      await resend.emails.send({
+        from: 'Condovia <noreply@condovia.it>',
+        to: u.email,
+        subject: 'Password reimpostata — Condovia',
+        html: `<p>Ciao ${u.nome},</p>
+          <p>Abbiamo ricevuto una richiesta di reset della tua password.</p>
+          <p><strong>Nuova password temporanea:</strong> ${tempPw}</p>
+          <p>Accedi con questa password e cambiale dal tuo profilo.</p>
+          <p>Se non hai richiesto il reset, contatta il team Condovia.</p>
+          <p>— Il team Condovia</p>`,
+      }).catch(e => console.error('Email forgot password fallita:', e.message));
+    }
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // GET /api/auth/me
 router.get('/me', requireAuth, (req, res) => {
   res.json(req.utente);

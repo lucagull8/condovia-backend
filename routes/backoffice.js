@@ -533,6 +533,33 @@ router.patch('/fatturazione/:id', async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 // SEED-RESET (solo sviluppo)
 // ═══════════════════════════════════════════════════════════
+router.post('/admin/:id/reset-password', async (req, res) => {
+  try {
+    const u = await Utente.findById(req.params.id);
+    if (!u) return res.status(404).json({ error: 'Utente non trovato' });
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+    let tempPw = '';
+    for (let i = 0; i < 10; i++) tempPw += chars[Math.floor(Math.random() * chars.length)];
+    u.password = tempPw;
+    await u.save();
+    if (process.env.RESEND_API_KEY) {
+      const { Resend } = require('resend');
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      await resend.emails.send({
+        from: 'Condovia <noreply@condovia.it>',
+        to: u.email,
+        subject: 'Password reimpostata — Condovia',
+        html: `<p>Ciao ${u.nome},</p>
+          <p>Il team Condovia ha reimpostato la tua password.</p>
+          <p><strong>Nuova password temporanea:</strong> ${tempPw}</p>
+          <p>Accedi e cambia la password dal tuo profilo.</p>
+          <p>— Il team Condovia</p>`,
+      }).catch(e => console.error('Email reset password fallita:', e.message));
+    }
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.post('/seed-reset', async (req, res) => {
   if (process.env.NODE_ENV === 'production' || process.env.LOAD_DEMO !== 'true') {
     return res.status(403).json({ error: 'Operazione non consentita in questo ambiente' });
