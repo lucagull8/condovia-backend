@@ -2,7 +2,8 @@ const mongoose = require('mongoose');
 
 const podSchema = new mongoose.Schema({
   podNumber:  { type: String, default: '' },
-  pdfContent: { type: String, default: '' }, // base64
+  pdfContent: { type: String, default: '' },
+  pdfUrl:     { type: String, default: '' },
   pdfName:    { type: String, default: '' },
 }, { _id: false });
 
@@ -22,6 +23,7 @@ const contrattoSchema = new mongoose.Schema({
   stato:               { type: String, enum: ['attivo', 'scadenza', 'scaduto'], default: 'attivo' },
   // File storage base64 (evita problemi filesystem su Render)
   pdfContent:          { type: String, default: '' },
+  pdfUrl:              { type: String, default: '' },
   pdfName:             { type: String, default: '' },
   // Multi-POD per energia
   pods:                [podSchema],

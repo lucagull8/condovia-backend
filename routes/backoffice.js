@@ -10,6 +10,7 @@ const DocumentoAdmin = require('../models/DocumentoAdmin');
 const RichiestaWallet = require('../models/RichiestaWallet');
 const upload = require('../middleware/upload');
 const { requireAuth, requireCommerciale } = require('../middleware/auth');
+const { uploadToR2, deleteFromR2, r2Enabled } = require('../lib/r2');
 
 router.use(requireAuth, requireCommerciale);
 
@@ -123,16 +124,18 @@ router.post('/admin/:id/documenti', upload.single('file'), async (req, res) => {
     const { tipo, note } = req.body;
     if (!['nomina', 'bolletta'].includes(tipo)) return res.status(400).json({ error: 'Tipo non valido (nomina|bolletta)' });
 
-    const fileData = {
-      fileName: req.file.originalname,
-      fileContent: req.file.buffer.toString('base64'),
-      note: note || '',
-    };
+    const fileData = { fileName: req.file.originalname, note: note || '' };
+    if (r2Enabled()) {
+      fileData.fileUrl = await uploadToR2(req.file.buffer, req.file.originalname);
+      fileData.fileContent = '';
+    } else {
+      fileData.fileContent = req.file.buffer.toString('base64');
+    }
 
-    // Se esiste già un doc dello stesso tipo → aggiorna
     const existing = await DocumentoAdmin.findOne({ amministratoreId: req.params.id, tipo });
     let doc;
     if (existing) {
+      if (existing.fileUrl) await deleteFromR2(existing.fileUrl);
       doc = await DocumentoAdmin.findByIdAndUpdate(existing._id, fileData, { new: true }).select('-fileContent');
     } else {
       const created = await DocumentoAdmin.create({ amministratoreId: req.params.id, tipo, ...fileData });
@@ -146,7 +149,9 @@ router.post('/admin/:id/documenti', upload.single('file'), async (req, res) => {
 router.get('/admin/:id/documento/:tipo/file', async (req, res) => {
   try {
     const doc = await DocumentoAdmin.findOne({ amministratoreId: req.params.id, tipo: req.params.tipo });
-    if (!doc || !doc.fileContent) return res.status(404).json({ error: 'Documento non trovato' });
+    if (!doc) return res.status(404).json({ error: 'Documento non trovato' });
+    if (doc.fileUrl) return res.redirect(doc.fileUrl);
+    if (!doc.fileContent) return res.status(404).json({ error: 'Documento non trovato' });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${doc.fileName}"`);
     res.send(Buffer.from(doc.fileContent, 'base64'));
@@ -193,7 +198,12 @@ router.post('/admin/:id/wallet/paga', upload.single('ricevuta'), async (req, res
 
     const updateData = { stato: 'pagata' };
     if (req.file) {
-      updateData.ricevutaContent = req.file.buffer.toString('base64');
+      if (r2Enabled()) {
+        updateData.ricevutaUrl = await uploadToR2(req.file.buffer, req.file.originalname);
+        updateData.ricevutaContent = '';
+      } else {
+        updateData.ricevutaContent = req.file.buffer.toString('base64');
+      }
       updateData.ricevutaName = req.file.originalname;
     }
     await RichiestaWallet.findByIdAndUpdate(richiestaId, updateData);
@@ -209,7 +219,9 @@ router.post('/admin/:id/wallet/paga', upload.single('ricevuta'), async (req, res
 router.get('/richieste-wallet/:id/ricevuta', async (req, res) => {
   try {
     const r = await RichiestaWallet.findById(req.params.id);
-    if (!r || !r.ricevutaContent) return res.status(404).json({ error: 'Ricevuta non trovata' });
+    if (!r) return res.status(404).json({ error: 'Ricevuta non trovata' });
+    if (r.ricevutaUrl) return res.redirect(r.ricevutaUrl);
+    if (!r.ricevutaContent) return res.status(404).json({ error: 'Ricevuta non trovata' });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${r.ricevutaName || 'ricevuta.pdf'}"`);
     res.send(Buffer.from(r.ricevutaContent, 'base64'));
@@ -266,20 +278,35 @@ router.post('/contratti', upload.any(), async (req, res) => {
 
     // PDF principale
     const mainPdf = (req.files || []).find(f => f.fieldname === 'pdf');
+    let pdfName = '', pdfContent = '', pdfUrl = '';
+    if (mainPdf) {
+      pdfName = mainPdf.originalname;
+      if (r2Enabled()) {
+        pdfUrl = await uploadToR2(mainPdf.buffer, mainPdf.originalname);
+      } else {
+        pdfContent = mainPdf.buffer.toString('base64');
+      }
+    }
 
     // Multi-POD
     let pods = [];
     if (podsJson) {
       try {
         const podsData = JSON.parse(podsJson);
-        pods = podsData.map((p, idx) => {
+        pods = await Promise.all(podsData.map(async (p, idx) => {
           const podFile = (req.files || []).find(f => f.fieldname === `pod_pdf_${idx}`);
+          let podPdfContent = '', podPdfUrl = '';
+          if (podFile) {
+            if (r2Enabled()) podPdfUrl = await uploadToR2(podFile.buffer, podFile.originalname);
+            else podPdfContent = podFile.buffer.toString('base64');
+          }
           return {
             podNumber: p.podNumber || '',
-            pdfContent: podFile ? podFile.buffer.toString('base64') : '',
+            pdfContent: podPdfContent,
+            pdfUrl: podPdfUrl,
             pdfName: podFile ? podFile.originalname : '',
           };
-        });
+        }));
       } catch { pods = []; }
     }
 
@@ -294,8 +321,7 @@ router.post('/contratti', upload.any(), async (req, res) => {
       dataInizio: new Date(dataInizio),
       dataScadenza: new Date(dataScadenza),
       stato: 'attivo',
-      pdfContent: mainPdf ? mainPdf.buffer.toString('base64') : '',
-      pdfName: mainPdf ? mainPdf.originalname : '',
+      pdfContent, pdfUrl, pdfName,
       pods,
       richiestaId: richiestaId || undefined,
     });
@@ -323,8 +349,10 @@ router.post('/contratti', upload.any(), async (req, res) => {
 // Serve PDF contratto principale
 router.get('/contratti/:id/pdf', async (req, res) => {
   try {
-    const c = await Contratto.findById(req.params.id).select('pdfContent pdfName');
-    if (!c || !c.pdfContent) return res.status(404).json({ error: 'PDF non trovato' });
+    const c = await Contratto.findById(req.params.id).select('pdfContent pdfUrl pdfName');
+    if (!c) return res.status(404).json({ error: 'PDF non trovato' });
+    if (c.pdfUrl) return res.redirect(c.pdfUrl);
+    if (!c.pdfContent) return res.status(404).json({ error: 'PDF non trovato' });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${c.pdfName || 'contratto.pdf'}"`);
     res.send(Buffer.from(c.pdfContent, 'base64'));
@@ -336,7 +364,9 @@ router.get('/contratti/:id/pod/:idx/pdf', async (req, res) => {
   try {
     const c = await Contratto.findById(req.params.id).select('pods');
     const pod = c?.pods?.[parseInt(req.params.idx)];
-    if (!pod || !pod.pdfContent) return res.status(404).json({ error: 'PDF non trovato' });
+    if (!pod) return res.status(404).json({ error: 'PDF non trovato' });
+    if (pod.pdfUrl) return res.redirect(pod.pdfUrl);
+    if (!pod.pdfContent) return res.status(404).json({ error: 'PDF non trovato' });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${pod.pdfName || 'pod.pdf'}"`);
     res.send(Buffer.from(pod.pdfContent, 'base64'));
