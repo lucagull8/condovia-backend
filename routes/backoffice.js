@@ -413,9 +413,35 @@ router.get('/iscrizioni', async (req, res) => {
 
 router.patch('/iscrizioni/:id/approva', async (req, res) => {
   try {
-    const u = await Utente.findByIdAndUpdate(req.params.id, { stato: 'attivo' }, { new: true }).select('-password');
+    const u = await Utente.findById(req.params.id);
     if (!u) return res.status(404).json({ error: 'Utente non trovato' });
-    res.json(u);
+
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+    let tempPw = '';
+    for (let i = 0; i < 10; i++) tempPw += chars[Math.floor(Math.random() * chars.length)];
+
+    u.stato = 'attivo';
+    u.password = tempPw;
+    await u.save();
+
+    if (process.env.RESEND_API_KEY) {
+      const { Resend } = require('resend');
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      await resend.emails.send({
+        from: 'Condovia <noreply@condovia.it>',
+        to: u.email,
+        subject: 'Benvenuto su Condovia — Account attivato',
+        html: `<p>Ciao ${u.nome},</p>
+          <p>Il tuo account Condovia è stato approvato. Puoi accedere con queste credenziali:</p>
+          <p><strong>Email:</strong> ${u.email}<br>
+          <strong>Password temporanea:</strong> ${tempPw}</p>
+          <p>Ti consigliamo di cambiare la password al primo accesso.</p>
+          <p>— Il team Condovia</p>`,
+      }).catch(e => console.error('Email approva fallita:', e.message));
+    }
+
+    const { password: _, ...safe } = u.toObject();
+    res.json(safe);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -423,6 +449,21 @@ router.patch('/iscrizioni/:id/rifiuta', async (req, res) => {
   try {
     const u = await Utente.findByIdAndUpdate(req.params.id, { stato: 'rifiutato' }, { new: true }).select('-password');
     if (!u) return res.status(404).json({ error: 'Utente non trovato' });
+
+    if (process.env.RESEND_API_KEY) {
+      const { Resend } = require('resend');
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      await resend.emails.send({
+        from: 'Condovia <noreply@condovia.it>',
+        to: u.email,
+        subject: 'Aggiornamento sulla tua richiesta Condovia',
+        html: `<p>Ciao ${u.nome},</p>
+          <p>Purtroppo la tua richiesta di accesso alla piattaforma Condovia non è stata approvata.</p>
+          <p>Per ulteriori informazioni contatta il nostro team.</p>
+          <p>— Il team Condovia</p>`,
+      }).catch(e => console.error('Email rifiuta fallita:', e.message));
+    }
+
     res.json(u);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

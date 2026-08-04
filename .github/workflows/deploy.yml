@@ -1,0 +1,65 @@
+# Questo workflow è per la Fase 2 (migrazione VPS).
+# Decommentare quando il VPS è attivo.
+#
+# Secrets GitHub necessari (Settings → Secrets and variables → Actions):
+#   VPS_HOST: IP del VPS Hetzner
+#   SSH_PRIVATE_KEY: chiave privata SSH (da ssh-keygen -t ed25519)
+#   VPS_USER: condovia
+#
+# name: Deploy Condovia
+#
+# on:
+#   push:
+#     branches: [main]
+#
+# jobs:
+#   deploy-backend:
+#     name: Deploy Backend → VPS
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#
+#       - name: Deploy via SSH
+#         uses: appleboy/ssh-action@v1
+#         with:
+#           host: ${{ secrets.VPS_HOST }}
+#           username: ${{ secrets.VPS_USER }}
+#           key: ${{ secrets.SSH_PRIVATE_KEY }}
+#           script: |
+#             cd /home/condovia/condovia-backend
+#             git pull origin main
+#             npm ci --production
+#             pm2 reload condovia-backend
+#
+#   deploy-frontend:
+#     name: Build & Deploy Frontend → VPS
+#     runs-on: ubuntu-latest
+#     needs: deploy-backend
+#     steps:
+#       - uses: actions/checkout@v4
+#         with:
+#           repository: lucagull8/condovia-frontend
+#           token: ${{ secrets.GITHUB_TOKEN }}
+#
+#       - uses: actions/setup-node@v4
+#         with:
+#           node-version: 22
+#           cache: npm
+#
+#       - run: npm ci
+#         working-directory: .
+#
+#       - name: Build
+#         run: npm run build
+#         env:
+#           VITE_API_URL: https://api.condovia.it
+#
+#       - name: Upload to VPS
+#         uses: appleboy/scp-action@v0.1.7
+#         with:
+#           host: ${{ secrets.VPS_HOST }}
+#           username: ${{ secrets.VPS_USER }}
+#           key: ${{ secrets.SSH_PRIVATE_KEY }}
+#           source: dist/*
+#           target: /var/www/condovia/
+#           strip_components: 1
