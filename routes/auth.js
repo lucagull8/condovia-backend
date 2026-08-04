@@ -69,6 +69,19 @@ router.post('/change-password', requireAuth, async (req, res) => {
     if (!ok) return res.status(401).json({ error: 'Password attuale non corretta' });
     u.password = newPassword;
     await u.save();
+    if (process.env.RESEND_API_KEY) {
+      const { Resend } = require('resend');
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      await resend.emails.send({
+        from: 'Condovia <noreply@condovia.it>',
+        to: u.email,
+        subject: 'Password cambiata con successo — Condovia',
+        html: `<p>Ciao ${u.nome},</p>
+          <p>La tua password è stata cambiata con successo.</p>
+          <p>Se non hai eseguito questa operazione, contatta immediatamente il team Condovia.</p>
+          <p>— Il team Condovia</p>`,
+      }).catch(e => console.error('Email cambio password fallita:', e.message));
+    }
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
